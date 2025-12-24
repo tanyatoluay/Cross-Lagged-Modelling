@@ -46,7 +46,7 @@ project_root/
 ├── estimands/                # Analytic + Monte Carlo “truth” estimands
 │
 ├── methods/
-│   ├── g-formula/            # G-formula fits
+│   ├── g-formula/            # G-formula fits, performance, visualizetions and tables
 │   ├── sem/                  # SEM fits, summaries, performance metrics
 │   └── dynamite/             # MCMC fits, posterior summaries, checkpoints, metrics
 │
@@ -91,6 +91,12 @@ project_root/
 - Standardizes variables, rescales effects  
 - Automated checkpointing for HPC jobs  
 - Posterior extractions + performance metrics
+
+#### **G-FORMULA (`M-gformula-core.R`)**
+- Implementation of g-formula via **gfoRmula**  
+- Computes potential outcomes with treatment levels of 0 and 0.25    
+- Automated checkpointing for HPC jobs
+- Performance metrics 
 
 ### **P — Performance (`P-performance.R`)**
 
@@ -142,4 +148,9 @@ library(ggplot2)
 - Tikka, S., Helske, J., Clark, N., & McGowan, L. D. (2025).  
   *dynamite: Bayesian dynamic multivariate panel models* (R package version).  
   https://doi.org/10.32614/CRAN.package.dynamite
+
+- McGrath, S., Vivian L., Zhen Z., Rowan W. Logan, Miguel A. Hernán, and Jessica G. Young. 2020.
+  “gfoRmula: Parametric g-Formula for Time-Varying Treatments and Confounders.”
+  Patterns 1 (3): 100008. https://doi.org/10.1016/j.patter.2020.100008.
+
 

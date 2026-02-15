@@ -1,10 +1,11 @@
 ###############################################################################
 # Master performance + plotting script for SEM vs DYNAMITE 
+#
 # Project root: /data/cephfs-1/home/users/tato10_c/work/causal_inference_panel_data
 #
 # Functionality:
-#   - Load SEM 
-#   - Load and merge DYNAMITE 
+#   - Load SEM results
+#   - Load and merge DYNAMITE results (handle multiple files per scenario)
 #   - Build combined long-format dataset
 #   - Compute full set of performance metrics (Morris-style)
 #   - Generate tables (SEM / DYNAMITE / combined)
@@ -18,6 +19,20 @@
 #       * SE(model) density
 #       * SE(model) vs estimate
 #       * SEM vs DYNAMITE limits-of-agreement
+#
+# Visual design:
+#   - Colour-blind friendly Okabe–Ito palette
+#   - High luminance contrast for grayscale printing
+#   - Shapes + linetypes for point/line geoms where relevant
+###############################################################################
+
+## 0. Setup -------------------------------------------------------------------
+
+setwd("/data/cephfs-1/home/users/tato10_c/work/causal_inference_panel_data")
+
+###############################################################################
+# Master performance + plotting script for SEM vs DYNAMITE
+# (Axis label override: show DYNAMITE as "Bayesian DMPM" in plots only)
 ###############################################################################
 
 ## 0. Setup -------------------------------------------------------------------
@@ -44,7 +59,7 @@ dir.create(plots_dir,   showWarnings = FALSE)
 dir.create(combined_dir,showWarnings = FALSE)
 
 ###############################################################################
-# 1. Utility: labels, Morris colour scheme, MC performance function
+# 1. Labels, colour/shape definitions, MC performance function
 ###############################################################################
 
 # Scenario labels for plotting
@@ -54,22 +69,33 @@ scenario_labels <- c(
   "3" = "S3: X ↔ Y"
 )
 
-# Morris-style colour palette
+# Plot-only method labels (KEEP raw method names in data; relabel in plots)
+method_labels_plot <- c(
+  "SEM"      = "SEM",
+  "DYNAMITE" = "Bayesian DMPM"
+)
+
+# Colour-blind friendly Okabe–Ito palette
 morris_cols <- c(
-  "SEM"      = "#1B63A0",   # deep blue
-  "DYNAMITE" = "#7F7F7F"    # neutral grey
+  "SEM"      = "#2C3E50",  # dark navy blue
+  "DYNAMITE" = "#E64B35"   # orange-red (CVD-safe red)
 )
 
 morris_fill <- c(
-  "SEM"      = "#1B63A0",
-  "DYNAMITE" = "#B1B1B1"
+  "SEM"      = "#4F6A84",  # lighter navy
+  "DYNAMITE" = "#F28E86"   # light orange-red
 )
 
+# Shapes/linetypes keyed by *raw* method names
+shape_values    <- c("SEM" = 16, "DYNAMITE" = 17)
+linetype_values <- c("SEM" = "solid", "DYNAMITE" = "dashed")
+
+#-------------------------------------------------------------------------------
 # Monte Carlo performance summary (extended with ModSE etc.)
+#-------------------------------------------------------------------------------
 mc_se <- function(estimates, theta, ci_low, ci_high, se_mod) {
   nsim <- length(estimates)
   
-  # Basic quantities
   bias <- mean(estimates) - theta
   bias_mcse <- sqrt(var(estimates) / nsim)
   
@@ -83,23 +109,18 @@ mc_se <- function(estimates, theta, ci_low, ci_high, se_mod) {
   cover <- mean(ci_low <= theta & ci_high >= theta)
   cover_mcse <- sqrt(cover * (1 - cover) / nsim)
   
-  # Model-based SE from CI width
   s2 <- se_mod^2
   m_s2 <- mean(s2, na.rm = TRUE)
   ModSE <- sqrt(m_s2)
   
-  # Delta-method MC SE for ModSE
   var_m <- var(s2, na.rm = TRUE) / nsim
   ModSE_mcse <- if (m_s2 > 0) sqrt(var_m / (4 * m_s2)) else NA_real_
   
-  # Bias-eliminated coverage (coverage of CI for mean(est))
   theta_hat <- mean(estimates)
   cover_be  <- mean(ci_low <= theta_hat & ci_high >= theta_hat)
   cover_be_mcse <- sqrt(cover_be * (1 - cover_be) / nsim)
   
-  # Relative error in ModSE vs empirical SE
   rel_ModSE <- ModSE / empSE - 1
-  # Approx MC SE using independence assumption between ModSE and empSE
   rel_ModSE_mcse <- sqrt(
     (ModSE_mcse / empSE)^2 +
       (ModSE * empSE_mcse / empSE^2)^2
@@ -117,7 +138,7 @@ mc_se <- function(estimates, theta, ci_low, ci_high, se_mod) {
 }
 
 ###############################################################################
-# 2. Load SEM results 
+# 2. Load SEM results
 ###############################################################################
 
 sem_results_file <- file.path(sem_dir, "sem_results_all.rds")
@@ -127,11 +148,6 @@ if (!file.exists(sem_results_file)) {
 
 sem_results <- readRDS(sem_results_file)
 
-# Expected columns in sem_results:
-# scenario, rep_id, beta_xy_hat, beta_xy_low, beta_xy_high, beta_xy_true,
-# beta_yx_hat, beta_yx_low, beta_yx_high, beta_yx_true
-
-# Long format: one row per method × scenario × rep × effect
 sem_long <- bind_rows(
   sem_results %>%
     transmute(
@@ -158,10 +174,9 @@ sem_long <- bind_rows(
 )
 
 ###############################################################################
-# 3. Load DYNAMITE results 
+# 3. Load DYNAMITE results
 ###############################################################################
 
-# Helper: merge all dynamite_results_sX_*.rds using file modification times
 load_dyn_results_for_scenario <- function(s) {
   pattern <- sprintf("^dynamite_results_s%i_.*\\.rds$", s)
   files <- list.files(dyn_dir, pattern = pattern, full.names = TRUE)
@@ -187,7 +202,6 @@ load_dyn_results_for_scenario <- function(s) {
   
   dyn_all <- bind_rows(dyn_list)
   
-  # Keep the latest entry per scenario × replicate (handles re-runs/checkpoints)
   dyn_all %>%
     arrange(scenario, rep_id, file_order) %>%
     group_by(scenario, rep_id) %>%
@@ -202,7 +216,6 @@ dyn_results <- bind_rows(
   load_dyn_results_for_scenario(3)
 )
 
-# Optional sanity check: report number of reps per scenario/method
 message("DYNAMITE reps per scenario (after merge):")
 print(
   dyn_results %>%
@@ -210,7 +223,6 @@ print(
     arrange(scenario)
 )
 
-# DYNAMITE to long format
 dyn_long <- bind_rows(
   dyn_results %>%
     transmute(
@@ -219,8 +231,8 @@ dyn_long <- bind_rows(
       rep_id,
       effect = "XY",
       est    = beta_xy_hat,
-      ci_low = beta_xy_q05,
-      ci_high= beta_xy_q95,
+      ci_low = beta_xy_q025,   
+      ci_high= beta_xy_q975,   
       theta  = beta_xy_true
     ),
   dyn_results %>%
@@ -230,11 +242,12 @@ dyn_long <- bind_rows(
       rep_id,
       effect = "YX",
       est    = beta_yx_hat,
-      ci_low = beta_yx_q05,
-      ci_high= beta_yx_q95,
+      ci_low = beta_yx_q025,   
+      ci_high= beta_yx_q975,   
       theta  = beta_yx_true
     )
 )
+
 
 ###############################################################################
 # 4. Combined long dataset for plotting
@@ -243,9 +256,9 @@ dyn_long <- bind_rows(
 all_long <- bind_rows(sem_long, dyn_long) %>%
   mutate(
     scenario_label = recode(as.character(scenario), !!!scenario_labels),
+    # KEEP raw method names here; relabel at plot scale
     method = factor(method, levels = c("SEM", "DYNAMITE")),
     effect = factor(effect, levels = c("XY", "YX")),
-    # Model-based SE from CI width (assuming 95% equal-tailed intervals)
     se_mod = (ci_high - ci_low) / (2 * qnorm(0.975)),
     covered = ci_low <= theta & ci_high >= theta
   )
@@ -258,13 +271,11 @@ readr::write_csv(all_long,
 # 5. Performance metrics per method × scenario × effect (Morris-style)
 ###############################################################################
 
-# Use data.table for clean MC performance calculation
 all_dt <- as.data.table(all_long)
 
 perf_dt <- all_dt[, mc_se(est, unique(theta), ci_low, ci_high, se_mod),
                   by = .(method, scenario, effect)]
 
-# Add labels + RMSE and its MC SE
 perf_dt[, `:=`(
   scenario_label = scenario_labels[as.character(scenario)],
   RMSE = sqrt(MSE),
@@ -285,11 +296,10 @@ setcolorder(
 
 perf_all <- as_tibble(perf_dt)
 
-# Split out per-method tables
+# Per-method tables (still keyed by raw method names)
 sem_performance  <- perf_all %>% filter(method == "SEM")
 dyn_performance  <- perf_all %>% filter(method == "DYNAMITE")
 
-# Persist tables (CSV & RDS)
 readr::write_csv(sem_performance,
                  file.path(tables_dir, "sem_performance_by_scenario.csv"))
 readr::write_csv(dyn_performance,
@@ -308,7 +318,6 @@ saveRDS(perf_all,
 # 6. Plot factory: standard plots + ZIP + lollipop + SE diagnostics
 ###############################################################################
 
-# Helper to save both PNG and PDF
 save_plot_dual <- function(plot, filename_base, width = 8, height = 4) {
   png_file <- file.path(plots_dir, paste0(filename_base, ".png"))
   pdf_file <- file.path(plots_dir, paste0(filename_base, ".pdf"))
@@ -316,13 +325,12 @@ save_plot_dual <- function(plot, filename_base, width = 8, height = 4) {
   ggsave(pdf_file, plot, width = width, height = height)
 }
 
-# Iterate over scenarios
 for (s in sort(unique(all_long$scenario))) {
   
-  scen_data <- all_long %>% filter(scenario == s)
+  scen_data  <- all_long %>% filter(scenario == s)
   scen_label <- unique(scen_data$scenario_label)
   
-  # 6.1 Density of estimates by method, faceted by effect --------------------
+  # 6.1 Density
   p_density <- ggplot(scen_data,
                       aes(x = est, colour = method, fill = method)) +
     geom_density(alpha = 0.25) +
@@ -335,14 +343,15 @@ for (s in sort(unique(all_long$scenario))) {
       colour = "Method", fill = "Method"
     ) +
     theme_bw() +
-    scale_colour_manual(values = morris_cols) +
-    scale_fill_manual(values = morris_fill)
+    scale_colour_manual(values = morris_cols, labels = method_labels_plot) +
+    scale_fill_manual(values = morris_fill, labels = method_labels_plot) +
+    scale_x_discrete(labels = method_labels_plot)
   
   save_plot_dual(p_density,
                  sprintf("s%i_density_estimates", s),
                  width = 9, height = 4)
   
-  # 6.2 Boxplots of estimates per method × effect ----------------------------
+  # 6.2 Boxplots
   p_box <- ggplot(scen_data,
                   aes(x = method, y = est, fill = method)) +
     geom_boxplot(outlier.alpha = 0.4) +
@@ -354,33 +363,38 @@ for (s in sort(unique(all_long$scenario))) {
       x = "Method", y = "Estimate"
     ) +
     theme_bw() +
-    scale_fill_manual(values = morris_fill)
+    scale_fill_manual(values = morris_fill, labels = method_labels_plot) +
+    scale_x_discrete(labels = method_labels_plot)
   
   save_plot_dual(p_box,
                  sprintf("s%i_boxplots_estimates", s),
                  width = 7, height = 4)
   
-  # 6.3 Estimates by replicate (jittered) ------------------------------------
+  # 6.3 Scatter by replicate
   p_scatter <- ggplot(scen_data,
-                      aes(x = rep_id, y = est, colour = method)) +
-    geom_point(alpha = 0.6, size = 0.8,
-               position = position_jitter(width = 0.15, height = 0)) +
+                      aes(x = rep_id, y = est,
+                          colour = method, shape = method)) +
+    geom_point(
+      alpha = 0.6, size = 0.8,
+      position = position_jitter(width = 0.15, height = 0)
+    ) +
     geom_hline(aes(yintercept = theta),
                linetype = "dashed", colour = "black") +
     facet_wrap(~effect, scales = "free_y", nrow = 2) +
     labs(
       title = paste0("Estimates across replicates: ", scen_label),
       x = "Replication", y = "Estimate",
-      colour = "Method"
+      colour = "Method", shape = "Method"
     ) +
     theme_bw() +
-    scale_colour_manual(values = morris_cols)
+    scale_colour_manual(values = morris_cols, labels = method_labels_plot) +
+    scale_shape_manual(values  = shape_values, labels = method_labels_plot)
   
   save_plot_dual(p_scatter,
                  sprintf("s%i_scatter_estimates_by_rep", s),
                  width = 9, height = 5)
   
-  # 6.4 Performance barplots: bias, RMSE, coverage ---------------------------
+  # 6.4 Performance barplots
   scen_perf <- perf_all %>% filter(scenario == s)
   
   # Bias
@@ -396,7 +410,8 @@ for (s in sort(unique(all_long$scenario))) {
       x = "Method", y = "Bias"
     ) +
     theme_bw() +
-    scale_fill_manual(values = morris_fill)
+    scale_fill_manual(values = morris_fill, labels = method_labels_plot) +
+    scale_x_discrete(labels = method_labels_plot)
   
   save_plot_dual(p_bias,
                  sprintf("s%i_bias_by_method", s),
@@ -415,7 +430,8 @@ for (s in sort(unique(all_long$scenario))) {
       x = "Method", y = "RMSE"
     ) +
     theme_bw() +
-    scale_fill_manual(values = morris_fill)
+    scale_fill_manual(values = morris_fill, labels = method_labels_plot) +
+    scale_x_discrete(labels = method_labels_plot)
   
   save_plot_dual(p_rmse,
                  sprintf("s%i_rmse_by_method", s),
@@ -436,13 +452,14 @@ for (s in sort(unique(all_long$scenario))) {
       x = "Method", y = "Coverage"
     ) +
     theme_bw() +
-    scale_fill_manual(values = morris_fill)
+    scale_fill_manual(values = morris_fill, labels = method_labels_plot) +
+    scale_x_discrete(labels = method_labels_plot)
   
   save_plot_dual(p_cover,
                  sprintf("s%i_coverage_by_method", s),
                  width = 7, height = 4)
   
-  # 6.5 ZIP plots (per effect) -----------------------------------------------
+  # 6.5 ZIP plots
   for (eff in levels(scen_data$effect)) {
     
     scen_eff <- scen_data %>% filter(effect == eff)
@@ -455,7 +472,8 @@ for (s in sort(unique(all_long$scenario))) {
       )
     
     p_zip <- ggplot(zip_data,
-                    aes(x = rank, y = z, colour = method)) +
+                    aes(x = rank, y = z,
+                        colour = method, shape = method)) +
       geom_point(size = 1.2, alpha = 0.7) +
       geom_hline(yintercept = c(-1.96, 1.96),
                  linetype = "dashed") +
@@ -465,7 +483,8 @@ for (s in sort(unique(all_long$scenario))) {
         y = "z = (est - theta) / SE(model)"
       ) +
       theme_bw() +
-      scale_colour_manual(values = morris_cols)
+      scale_colour_manual(values = morris_cols, labels = method_labels_plot) +
+      scale_shape_manual(values  = shape_values, labels = method_labels_plot)
     
     save_plot_dual(
       p_zip,
@@ -474,7 +493,7 @@ for (s in sort(unique(all_long$scenario))) {
     )
   }
   
-  # 6.6 Lollipop performance summary (per scenario) --------------------------
+  # 6.6 Lollipop performance summary
   perf_scen <- perf_all %>% filter(scenario == s)
   
   perf_long <- perf_scen %>%
@@ -509,7 +528,8 @@ for (s in sort(unique(all_long$scenario))) {
     )
   
   p_lolli <- ggplot(perf_long,
-                    aes(x = metric, y = estimate, colour = method)) +
+                    aes(x = metric, y = estimate,
+                        colour = method, shape = method)) +
     geom_point(position = position_dodge(width = 0.6), size = 2) +
     geom_errorbar(aes(ymin = estimate - mcse,
                       ymax = estimate + mcse),
@@ -523,7 +543,8 @@ for (s in sort(unique(all_long$scenario))) {
       x = "Metric",
       y = "Value"
     ) +
-    scale_colour_manual(values = morris_cols)
+    scale_colour_manual(values = morris_cols, labels = method_labels_plot) +
+    scale_shape_manual(values  = shape_values, labels = method_labels_plot)
   
   save_plot_dual(
     p_lolli,
@@ -531,7 +552,7 @@ for (s in sort(unique(all_long$scenario))) {
     width = 10, height = 6
   )
   
-  # 6.7 SE(model) density ----------------------------------------------------
+  # 6.7 SE(model) density
   p_se_density <- ggplot(scen_data,
                          aes(x = se_mod, colour = method, fill = method)) +
     geom_density(alpha = 0.25) +
@@ -539,45 +560,49 @@ for (s in sort(unique(all_long$scenario))) {
     theme_bw() +
     labs(title = paste0("Model-based SE distribution: ", scen_label),
          x = "SE(model)", y = "Density") +
-    scale_colour_manual(values = morris_cols) +
-    scale_fill_manual(values = morris_fill)
+    scale_colour_manual(values = morris_cols, labels = method_labels_plot) +
+    scale_fill_manual(values = morris_fill, labels = method_labels_plot)
   
   save_plot_dual(p_se_density,
                  sprintf("s%i_se_density", s),
                  width = 8, height = 4)
   
-  # 6.8 SE(model) vs estimate -----------------------------------------------
+  # 6.8 SE(model) vs estimate
   p_se_vs_est <- ggplot(scen_data,
-                        aes(x = est, y = se_mod, colour = method)) +
+                        aes(x = est, y = se_mod,
+                            colour = method, shape = method)) +
     geom_point(alpha = 0.5) +
     facet_wrap(~effect, scales = "free") +
     theme_bw() +
     labs(title = paste0("SE(model) vs estimate: ", scen_label),
          x = "Estimate", y = "SE(model)") +
-    scale_colour_manual(values = morris_cols)
+    scale_colour_manual(values = morris_cols, labels = method_labels_plot) +
+    scale_shape_manual(values  = shape_values, labels = method_labels_plot)
   
   save_plot_dual(p_se_vs_est,
                  sprintf("s%i_se_vs_est", s),
                  width = 8, height = 4)
   
-  # 6.9 SEM vs DYNAMITE limits-of-agreement ----------------------------------
+  # 6.9 SEM vs DYNAMITE limits-of-agreement
   wide <- scen_data %>%
     select(method, rep_id, effect, est) %>%
     pivot_wider(names_from = method, values_from = est) %>%
     filter(!is.na(SEM), !is.na(DYNAMITE))
   
   if (nrow(wide) > 0) {
+    mean_diff <- mean(wide$SEM - wide$DYNAMITE)
+    
     p_loa <- ggplot(wide,
                     aes(x = (SEM + DYNAMITE)/2,
                         y = SEM - DYNAMITE)) +
       geom_point(alpha = 0.5) +
-      geom_hline(yintercept = mean(wide$SEM - wide$DYNAMITE),
+      geom_hline(yintercept = mean_diff,
                  linetype = "dashed") +
       facet_wrap(~effect, scales = "free") +
       labs(
         title = paste0("Limits of agreement: ", scen_label),
-        x = "Mean(SEM, DYNAMITE)",
-        y = "SEM − DYNAMITE"
+        x = "Mean(SEM, Bayesian DMPM)",
+        y = "SEM − Bayesian DMPM"
       ) +
       theme_bw()
     
@@ -589,5 +614,4 @@ for (s in sort(unique(all_long$scenario))) {
 
 ###############################################################################
 # 7. Done ---------------------------------------------------------------------
-
 message("Performance tables and plots written under: ", perf_root)

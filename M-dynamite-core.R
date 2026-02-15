@@ -131,7 +131,10 @@ fit_dynamite_scenario <- function(scenario, rep_id, seed = NULL) {
   saveRDS(dyn_fit, fit_path)
   
   ## Posterior summaries for standardized betas
-  post_sum <- as.data.frame(dyn_fit, types = "beta", summary = TRUE)
+  post_sum <- as.data.frame(
+    dyn_fit, types = "beta", summary = TRUE,
+    probs = c(0.025, 0.975)  # CHANGED: request 95% interval endpoints (2.5% and 97.5%)
+  )
   post_path <- file.path(post_dir, sprintf("dyn_post_std_s%i_rep%i.csv", scenario, rep_id))
   readr::write_csv(post_sum, post_path)
   
@@ -147,32 +150,32 @@ fit_dynamite_scenario <- function(scenario, rep_id, seed = NULL) {
   k_xy <- sd_Y / sd_X
   k_yx <- sd_X / sd_Y
   
-  beta_xy_hat <- beta_xy$mean * k_xy
-  beta_xy_sd  <- beta_xy$sd   * k_xy
-  beta_xy_q05 <- beta_xy$q5   * k_xy
-  beta_xy_q95 <- beta_xy$q95  * k_xy
+  beta_xy_hat  <- beta_xy$mean   * k_xy
+  beta_xy_sd   <- beta_xy$sd     * k_xy
+  beta_xy_q025 <- beta_xy$`q2.5` * k_xy  
+  beta_xy_q975 <- beta_xy$`q97.5`* k_xy  
   
-  beta_yx_hat <- beta_yx$mean * k_yx
-  beta_yx_sd  <- beta_yx$sd   * k_yx
-  beta_yx_q05 <- beta_yx$q5   * k_yx
-  beta_yx_q95 <- beta_yx$q95  * k_yx
+  beta_yx_hat  <- beta_yx$mean   * k_yx
+  beta_yx_sd   <- beta_yx$sd     * k_yx
+  beta_yx_q025 <- beta_yx$`q2.5` * k_yx  
+  beta_yx_q975 <- beta_yx$`q97.5`* k_yx  
   
   truth <- true_estimands(scenario)
   
   tibble(
-    scenario     = scenario,
-    rep_id       = rep_id,
-    mcmc_seed    = seed,
-    beta_xy_hat  = beta_xy_hat,
-    beta_xy_sd   = beta_xy_sd,
-    beta_xy_q05  = beta_xy_q05,
-    beta_xy_q95  = beta_xy_q95,
-    beta_yx_hat  = beta_yx_hat,
-    beta_yx_sd   = beta_yx_sd,
-    beta_yx_q05  = beta_yx_q05,
-    beta_yx_q95  = beta_yx_q95,
-    beta_xy_true = truth$ACE_XY,
-    beta_yx_true = truth$ACE_YX
+    scenario      = scenario,
+    rep_id        = rep_id,
+    mcmc_seed     = seed,
+    beta_xy_hat   = beta_xy_hat,
+    beta_xy_sd    = beta_xy_sd,
+    beta_xy_q025  = beta_xy_q025,  
+    beta_xy_q975  = beta_xy_q975,  
+    beta_yx_hat   = beta_yx_hat,
+    beta_yx_sd    = beta_yx_sd,
+    beta_yx_q025  = beta_yx_q025,  
+    beta_yx_q975  = beta_yx_q975,  
+    beta_xy_true  = truth$ACE_XY,
+    beta_yx_true  = truth$ACE_YX
   )
 }
 
@@ -224,7 +227,7 @@ if (resume_global_id > 0) {
   message("RESUMING scenario ", SCENARIO, " from checkpoint: ", ckpt_file)
   
   prev <- readRDS(ckpt_file)
-  dyn_results_list <- as.list(split(prev, seq_len(nrow(prev)))) 
+  dyn_results_list <- as.list(split(prev, seq_len(nrow(prev))))
 }
 
 ###############################################################################
@@ -244,7 +247,7 @@ for (gid in start_at:end_at) {
   
   message("Global ", gid, "/", end_at, " — Scenario ", s, ", Rep ", r)
   
-  ## **Skip if fit exists**  
+  ## **Skip if fit exists**
   fit_out <- file.path(fits_dir, sprintf("dyn_fit_s%i_rep%i.rds", s, r))
   if (file.exists(fit_out)) {
     message("  Found existing fit — SKIPPING")
@@ -315,8 +318,8 @@ setDT(dyn_results)
 dyn_perf <- dyn_results[, {
   theta_xy <- unique(beta_xy_true)
   theta_yx <- unique(beta_yx_true)
-  xy <- mc_se(beta_xy_hat, theta_xy, beta_xy_q05, beta_xy_q95)
-  yx <- mc_se(beta_yx_hat, theta_yx, beta_yx_q05, beta_yx_q95)
+  xy <- mc_se(beta_xy_hat, theta_xy, beta_xy_q025, beta_xy_q975) 
+  yx <- mc_se(beta_yx_hat, theta_yx, beta_yx_q025, beta_yx_q975) 
   cbind(effect = c("XY", "YX"), rbind(xy, yx))
 }, by = scenario]
 

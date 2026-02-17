@@ -2,11 +2,6 @@
 # SEM MONTE CARLO: RI-CLPM WITH TIME-VARYING CONFOUNDER (95% CI)
 # FULL PIPELINE IMPLEMENTATION (fixed beta extraction + more stable variances)
 #
-# Fixes vs your previous run:
-#   1) beta_xy / beta_yx appear 3× each (t1->t2, t2->t3, t3->t4) = 6 rows.
-#      We collapse by label and take slice(1) to match your old pipeline style.
-#   2) Adds equality constraints on within-person latent variances to reduce
-#      Heywood cases (negative lv variances).
 #
 # Outputs:
 #   - fits:        methods/sem_riclpm/fits/sem_riclpm_fit_s{S}_rep{R}.rds
